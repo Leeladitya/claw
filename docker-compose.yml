@@ -1,0 +1,71 @@
+# ─────────────────────────────────────────────────────────────────
+#  Claw — Docker Compose
+#
+#  Starts two containers:
+#    1. OPA sidecar   (:8181) — Policy evaluation engine
+#    2. Claw server   (:8787) — The API gateway
+#
+#  Usage:
+#    export ANTHROPIC_API_KEY="sk-ant-..."
+#    docker compose up
+#
+#  The OPA container loads Rego policies and data from the opa/
+#  directory via volume mount. Policy changes take effect on
+#  container restart (or via OPA's bundle polling if configured).
+# ─────────────────────────────────────────────────────────────────
+
+services:
+
+  # ── OPA Sidecar ──────────────────────────────────────────────
+  opa:
+    image: openpolicyagent/opa:latest-static
+    container_name: claw-opa
+    ports:
+      - "8181:8181"
+    volumes:
+      - ./opa/policies:/policies
+      - ./opa/data:/data
+    command:
+      - "run"
+      - "--server"
+      - "--addr=0.0.0.0:8181"
+      - "--log-level=info"
+      - "--log-format=json-pretty"
+      - "/policies"
+      - "/data"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8181/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+
+  # ── Claw API Server ─────────────────────────────────────────
+  server:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: claw-server
+    ports:
+      - "8787:8787"
+    environment:
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - CLAW_OPA_URL=http://opa:8181
+      - CLAW_POLICY_PACK=${CLAW_POLICY_PACK:-standard}
+      - CLAW_MODEL=${CLAW_MODEL:-claude-sonnet-4-5-20250514}
+      - CLAW_AUDIT_LOG=/app/logs/audit.jsonl
+    volumes:
+      - claw-audit-logs:/app/logs
+    depends_on:
+      opa:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8787/v1/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
+
+volumes:
+  claw-audit-logs:
+    driver: local

@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Claw</title>
+  <link rel="stylesheet" href="popup.css" />
+</head>
+<body>
+  <div id="app">
+
+    <!-- Header -->
+    <header>
+      <div class="brand">
+        <svg class="logo" width="22" height="22" viewBox="0 0 24 24" fill="none">
+          <path d="M12 2L4 7v5c0 5.55 3.84 10.74 8 12 4.16-1.26 8-6.45 8-12V7l-8-5z" stroke="currentColor" stroke-width="2" fill="none"/>
+          <path d="M9 12l2 2 4-4" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+        <h1>CLAW</h1>
+      </div>
+      <div class="header-right">
+        <span id="pack-badge" class="pack-badge">standard</span>
+        <span id="connection-dot" class="conn-dot"></span>
+      </div>
+    </header>
+
+    <!-- Status -->
+    <div id="status-bar" class="status-bar idle">
+      <div class="status-indicator">
+        <span id="status-icon" class="status-icon"></span>
+        <span id="status-text">Ready</span>
+      </div>
+      <span id="status-detail" class="status-detail"></span>
+    </div>
+
+    <!-- Action -->
+    <button id="btn-scan" class="btn-scan">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+        <path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7z"/>
+        <circle cx="12" cy="12" r="3"/>
+      </svg>
+      Scan &amp; Analyze
+    </button>
+
+    <!-- Results -->
+    <div id="results" class="hidden">
+
+      <!-- Policy Decision Banner -->
+      <div id="policy-banner" class="policy-banner">
+        <div class="policy-header">
+          <span id="policy-icon" class="policy-decision-icon"></span>
+          <div>
+            <p id="policy-decision-text" class="policy-decision-text"></p>
+            <p id="policy-detail" class="policy-detail"></p>
+          </div>
+        </div>
+        <div id="policy-rules" class="policy-rules hidden">
+          <p class="rules-label">Rules Matched</p>
+          <ul id="rules-list"></ul>
+        </div>
+        <div id="policy-mods" class="policy-mods hidden">
+          <p class="mods-label">Modifications Applied</p>
+          <ul id="mods-list"></ul>
+        </div>
+      </div>
+
+      <!-- PII Scan Results -->
+      <div id="pii-card" class="card hidden">
+        <div class="card-header">
+          <h2>PII Scan</h2>
+          <span id="pii-total" class="pii-total"></span>
+        </div>
+        <div id="pii-grid" class="pii-grid"></div>
+      </div>
+
+      <!-- Page Info -->
+      <div id="page-card" class="card">
+        <p class="card-label">Analyzing</p>
+        <p id="page-title" class="page-title"></p>
+        <p id="page-url" class="page-url"></p>
+      </div>
+
+      <!-- Summary -->
+      <div id="summary-card" class="card hidden">
+        <h2>Summary</h2>
+        <ul id="summary-bullets"></ul>
+      </div>
+
+      <!-- Risk Score -->
+      <div id="risk-card" class="card hidden">
+        <h2>Risk Assessment</h2>
+        <div class="risk-row">
+          <div class="risk-meter">
+            <div id="risk-fill" class="risk-fill"></div>
+          </div>
+          <span id="risk-score" class="risk-score">—</span>
+        </div>
+        <p id="risk-rationale" class="risk-rationale"></p>
+      </div>
+
+      <!-- Safety Flags -->
+      <div id="safety-card" class="card hidden">
+        <h2>Safety Flags</h2>
+        <div id="safety-list" class="safety-list"></div>
+      </div>
+
+      <!-- Audit -->
+      <div id="audit-card" class="card hidden">
+        <h2>Audit Trail</h2>
+        <div id="audit-grid" class="audit-grid"></div>
+      </div>
+    </div>
+
+    <!-- Denied State -->
+    <div id="denied" class="hidden">
+      <div class="denied-banner">
+        <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <circle cx="12" cy="12" r="10"/>
+          <path d="M15 9l-6 6M9 9l6 6"/>
+        </svg>
+        <h2>Blocked by Policy</h2>
+        <p id="denied-reason" class="denied-reason"></p>
+        <div id="denied-rules" class="denied-rules"></div>
+      </div>
+    </div>
+
+    <!-- Error -->
+    <div id="error" class="hidden card error-card">
+      <p id="error-text"></p>
+    </div>
+
+    <!-- Footer -->
+    <footer>
+      <span>Claw v1.0 — Policy-gated by OPA — Powered by Claude</span>
+    </footer>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>
