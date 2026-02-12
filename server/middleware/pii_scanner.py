@@ -1,180 +1,141 @@
 """
-middleware/pii_scanner.py — Stage 1: PII Detection & Masking
+PII Scanner — Pre-processing Content Analysis
 
-Scans extracted browser content for personally identifiable information
-using regex patterns. Returns both scan results (for OPA input) and
-optionally masked text (for model submission).
+Detects and masks personally identifiable information in extracted
+browser content before it reaches OPA evaluation or model inference.
 
-Supported PII types:
-  - SSN (US Social Security Numbers)
-  - Credit card numbers (Visa, MC, Amex, Discover)
-  - Email addresses
-  - Phone numbers (US/international)
-  - IP addresses (v4)
-
-This is the pre-processing layer that runs BEFORE OPA evaluation.
-OPA uses the scan results to make policy decisions; the masking
-itself is applied based on the policy decision.
+Supported PII types: SSN, Credit Cards, Email, Phone, IP addresses.
 """
 
 from __future__ import annotations
 
 import re
+import logging
 from dataclasses import dataclass, field
-from typing import NamedTuple
 
-from server.models import PIIScanResult
+logger = logging.getLogger("claw.pii")
 
-
-# ── Pattern Definitions ──────────────────────────────────────────
-
-class PIIPattern(NamedTuple):
-    name: str
-    pattern: re.Pattern
-    mask: str
-
-
-PATTERNS: list[PIIPattern] = [
-    PIIPattern(
-        name="ssn",
-        pattern=re.compile(
-            r'\b\d{3}[-\s]?\d{2}[-\s]?\d{4}\b'
-        ),
-        mask="[SSN_REDACTED]",
-    ),
-    PIIPattern(
-        name="credit_card",
-        pattern=re.compile(
-            r'\b(?:'
-            r'4\d{3}[-\s]?\d{4}[-\s]?\d{4}[-\s]?\d{4}'  # Visa
-            r'|5[1-5]\d{2}[-\s]?\d{4}[-\s]?\d{4}[-\s]?\d{4}'  # Mastercard
-            r'|3[47]\d{2}[-\s]?\d{6}[-\s]?\d{5}'  # Amex
-            r'|6(?:011|5\d{2})[-\s]?\d{4}[-\s]?\d{4}[-\s]?\d{4}'  # Discover
-            r')\b'
-        ),
-        mask="[CC_REDACTED]",
-    ),
-    PIIPattern(
-        name="email",
-        pattern=re.compile(
-            r'\b[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}\b'
-        ),
-        mask="[EMAIL_REDACTED]",
-    ),
-    PIIPattern(
-        name="phone",
-        pattern=re.compile(
-            r'(?<!\d)'  # negative lookbehind: no digit before
-            r'(?:'
-            r'(?:\+1[-.\s]?)?'  # optional +1 country code
-            r'(?:\(?\d{3}\)?[-.\s]?)'  # area code
-            r'\d{3}[-.\s]?\d{4}'  # number
-            r')'
-            r'(?!\d)'  # negative lookahead: no digit after
-        ),
-        mask="[PHONE_REDACTED]",
-    ),
-    PIIPattern(
-        name="ip_address",
-        pattern=re.compile(
-            r'\b(?:(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\.){3}'
-            r'(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\b'
-        ),
-        mask="[IP_REDACTED]",
-    ),
-]
-
-# ── Sensitive Keyword Patterns ───────────────────────────────────
-# These don't get masked but are reported to OPA for policy decisions
-
-SENSITIVE_KEYWORDS = re.compile(
-    r'\b('
-    r'confidential|top\s*secret|classified|internal\s+only'
-    r'|restricted|proprietary|do\s+not\s+distribute'
-    r'|attorney[\s-]client\s+privilege|trade\s+secret'
-    r'|password|passwd|api[_\s]?key|secret[_\s]?key|access[_\s]?token'
-    r')\b',
-    re.IGNORECASE,
-)
-
-
-# ── Scanner ──────────────────────────────────────────────────────
 
 @dataclass
-class ScanResult:
-    """Full scan result with counts, locations, and masked text."""
-    pii: PIIScanResult = field(default_factory=PIIScanResult)
+class PIIScanResult:
+    counts: dict[str, int] = field(default_factory=lambda: {
+        "ssn": 0, "credit_card": 0, "email": 0, "phone": 0, "ip_address": 0,
+    })
+    masked_text: str = ""
+    has_critical_pii: bool = False
+    has_any_pii: bool = False
     sensitive_keywords: list[str] = field(default_factory=list)
     classification_signals: list[str] = field(default_factory=list)
-    masked_text: str = ""
+
+    @property
+    def total_pii_count(self) -> int:
+        return sum(self.counts.values())
+
+    def to_dict(self) -> dict:
+        return {
+            "counts": self.counts,
+            "has_critical_pii": self.has_critical_pii,
+            "has_any_pii": self.has_any_pii,
+            "total_pii_count": self.total_pii_count,
+            "sensitive_keywords": self.sensitive_keywords,
+            "classification_signals": self.classification_signals,
+        }
 
 
-def scan_pii(text: str) -> ScanResult:
-    """
-    Scan text for PII patterns and sensitive keywords.
-    Returns counts for OPA input and pre-masked text.
-    """
-    result = ScanResult()
+SSN_PATTERN = re.compile(r'\b(\d{3}[-.\s]?\d{2}[-.\s]?\d{4})\b')
+CREDIT_CARD_PATTERNS = [
+    re.compile(r'\b(4\d{3}[-.\s]?\d{4}[-.\s]?\d{4}[-.\s]?\d{4})\b'),
+    re.compile(r'\b(5[1-5]\d{2}[-.\s]?\d{4}[-.\s]?\d{4}[-.\s]?\d{4})\b'),
+    re.compile(r'\b(3[47]\d{2}[-.\s]?\d{6}[-.\s]?\d{5})\b'),
+    re.compile(r'\b(6(?:011|5\d{2})[-.\s]?\d{4}[-.\s]?\d{4}[-.\s]?\d{4})\b'),
+]
+EMAIL_PATTERN = re.compile(r'\b([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})\b')
+PHONE_PATTERN = re.compile(r'\b(\+?1?[-.\s]?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4})\b')
+IP_PATTERN = re.compile(r'\b(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})\b')
+
+SENSITIVE_KEYWORDS = [
+    "confidential", "classified", "top secret", "restricted",
+    "password", "api_key", "api-key", "secret_key", "secret-key",
+    "access_token", "access-token", "private_key", "private-key",
+    "ssn", "social security", "credit card",
+    "internal only", "do not distribute", "privileged",
+]
+
+
+def scan_pii(text: str) -> PIIScanResult:
+    result = PIIScanResult()
     masked = text
 
-    counts: dict[str, int] = {}
+    ssns = [s for s in SSN_PATTERN.findall(text) if _validate_ssn(s)]
+    result.counts["ssn"] = len(ssns)
+    for ssn in ssns:
+        masked = masked.replace(ssn, "[SSN_REDACTED]")
 
-    for pat in PATTERNS:
-        matches = pat.pattern.findall(text)
-        count = len(matches)
-        counts[pat.name] = count
+    cc_count = 0
+    for pattern in CREDIT_CARD_PATTERNS:
+        matches = pattern.findall(text)
+        cc_count += len(matches)
+        for match in matches:
+            masked = masked.replace(match, "[CC_REDACTED]")
+    result.counts["credit_card"] = cc_count
 
-        if count > 0:
-            masked = pat.pattern.sub(pat.mask, masked)
+    emails = EMAIL_PATTERN.findall(text)
+    result.counts["email"] = len(emails)
+    for email in emails:
+        masked = masked.replace(email, "[EMAIL_REDACTED]")
 
-    # Build PIIScanResult
-    result.pii = PIIScanResult(
-        ssn=counts.get("ssn", 0),
-        credit_card=counts.get("credit_card", 0),
-        email=counts.get("email", 0),
-        phone=counts.get("phone", 0),
-        ip_address=counts.get("ip_address", 0),
-        total=sum(counts.values()),
-    )
+    phones = PHONE_PATTERN.findall(text)
+    result.counts["phone"] = len(phones)
+    for phone in phones:
+        masked = masked.replace(phone, "[PHONE_REDACTED]")
 
-    # Sensitive keyword detection
-    kw_matches = SENSITIVE_KEYWORDS.findall(text)
-    result.sensitive_keywords = list(set(kw.lower().strip() for kw in kw_matches))
+    ips = [ip for ip in IP_PATTERN.findall(text) if _validate_ip(ip)]
+    result.counts["ip_address"] = len(ips)
+    for ip in ips:
+        masked = masked.replace(ip, "[IP_REDACTED]")
 
-    # Classification signals
-    signals = []
-    if any(k in result.sensitive_keywords for k in ["confidential", "classified", "top secret", "restricted"]):
-        signals.append("confidential")
-    if any(k in result.sensitive_keywords for k in ["password", "passwd", "api_key", "secret_key", "access_token"]):
-        signals.append("credentials")
-    if any(k in result.sensitive_keywords for k in ["attorney-client privilege", "trade secret"]):
-        signals.append("legal_privileged")
-    if result.pii.ssn > 0 or result.pii.credit_card > 0:
-        signals.append("financial_pii")
-    result.classification_signals = signals
+    text_lower = text.lower()
+    for keyword in SENSITIVE_KEYWORDS:
+        if keyword in text_lower:
+            result.sensitive_keywords.append(keyword)
+
+    if any(k in text_lower for k in ["confidential", "classified", "top secret"]):
+        result.classification_signals.append("confidential")
+    if any(k in text_lower for k in ["financial", "revenue", "earnings"]):
+        result.classification_signals.append("financial")
+    if any(k in text_lower for k in ["medical", "patient", "hipaa"]):
+        result.classification_signals.append("medical")
+    if any(k in text_lower for k in ["legal", "attorney", "privilege"]):
+        result.classification_signals.append("legal")
 
     result.masked_text = masked
+    result.has_critical_pii = result.counts["ssn"] > 0 or result.counts["credit_card"] > 0
+    result.has_any_pii = result.total_pii_count > 0
 
     return result
 
 
-def mask_text(text: str, modifications: list[str] | None = None) -> tuple[str, list[str]]:
-    """
-    Apply PII masking to text and return (masked_text, list_of_modifications).
-    This is called in Stage 3 (context assembly) after OPA approves with modifications.
-    """
-    mods = modifications or []
-    result = scan_pii(text)
+def _validate_ssn(s: str) -> bool:
+    digits = re.sub(r'[^0-9]', '', s)
+    if len(digits) != 9:
+        return False
+    if digits[:3] in ("000", "666") or digits[:3] >= "900":
+        return False
+    if digits[3:5] == "00" or digits[5:] == "0000":
+        return False
+    return True
 
-    if result.pii.ssn > 0:
-        mods.append(f"pii_redaction: {result.pii.ssn} SSN(s) masked")
-    if result.pii.credit_card > 0:
-        mods.append(f"pii_redaction: {result.pii.credit_card} credit card number(s) masked")
-    if result.pii.email > 0:
-        mods.append(f"pii_redaction: {result.pii.email} email address(es) masked")
-    if result.pii.phone > 0:
-        mods.append(f"pii_redaction: {result.pii.phone} phone number(s) masked")
-    if result.pii.ip_address > 0:
-        mods.append(f"pii_redaction: {result.pii.ip_address} IP address(es) masked")
 
-    return result.masked_text, mods
+def _validate_ip(ip: str) -> bool:
+    parts = ip.split(".")
+    if len(parts) != 4:
+        return False
+    try:
+        octets = [int(p) for p in parts]
+        if any(o < 0 or o > 255 for o in octets):
+            return False
+        if octets[0] in (0, 127, 255):
+            return False
+        return True
+    except ValueError:
+        return False

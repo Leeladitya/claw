@@ -1,97 +1,66 @@
-/**
- * extractor.js — Claw Content Script
- *
- * Extracts the main readable content from the active tab's DOM
- * using lightweight readability heuristics. Communicates with
- * the popup via browser.runtime messaging.
- *
- * This is the UNTRUSTED layer — all security enforcement happens
- * server-side. This script is purely a content extraction tool.
- */
+// Claw Content Extractor — DOM heuristic extraction
+(function() {
+  if (window.__clawExtractorLoaded) return;
+  window.__clawExtractorLoaded = true;
 
-(() => {
-  "use strict";
+  function extractContent() {
+    // Semantic tag scoring
+    const SEMANTIC_TAGS = ['article', 'main', 'section', '[role="main"]'];
+    let container = null;
+    for (const sel of SEMANTIC_TAGS) {
+      container = document.querySelector(sel);
+      if (container && container.textContent.trim().length > 200) break;
+      container = null;
+    }
+    if (!container) container = document.body;
 
-  function scoreNode(node) {
-    let score = 0;
-    const tag = node.tagName?.toLowerCase();
-    const id = (node.id || "").toLowerCase();
-    const cls = (node.className || "").toLowerCase();
+    // Extract text, strip nav/footer/aside
+    const clone = container.cloneNode(true);
+    clone.querySelectorAll('nav, footer, aside, script, style, noscript, [role="navigation"], [role="banner"]')
+      .forEach(el => el.remove());
 
-    if (["article", "main", "section"].includes(tag)) score += 25;
-    if (/article|content|post|entry|story|body|text/i.test(id + cls)) score += 30;
-    if (/sidebar|nav|footer|header|menu|comment|ad|banner|widget/i.test(id + cls)) score -= 40;
-    if (["nav", "aside", "footer", "header"].includes(tag)) score -= 30;
+    let text = clone.textContent
+      .replace(/\s+/g, ' ')
+      .replace(/\n{3,}/g, '\n\n')
+      .trim();
 
-    const text = node.innerText || "";
-    const wordCount = text.split(/\s+/).filter(Boolean).length;
-    if (wordCount > 100) score += Math.min(wordCount / 10, 50);
-
-    return score;
-  }
-
-  function extractMainContent() {
-    const semantic = document.querySelector(
-      "article, [role='main'], main, .post-content, .article-body, .entry-content"
-    );
-    if (semantic && (semantic.innerText || "").split(/\s+/).length > 50) {
-      return cleanText(semantic.innerText);
+    // Truncate for model limits
+    const MAX_WORDS = 12000;
+    const words = text.split(/\s+/);
+    if (words.length > MAX_WORDS) {
+      text = words.slice(0, MAX_WORDS).join(' ') + '\n\n[TRUNCATED]';
     }
 
-    const candidates = document.querySelectorAll("div, section, article, main, td");
-    let bestNode = document.body;
-    let bestScore = -Infinity;
-
-    for (const node of candidates) {
-      const s = scoreNode(node);
-      if (s > bestScore) {
-        bestScore = s;
-        bestNode = node;
-      }
-    }
-
-    return cleanText(bestNode.innerText || document.body.innerText);
-  }
-
-  function cleanText(raw) {
-    return raw.replace(/\t/g, " ").replace(/ {2,}/g, " ").replace(/\n{3,}/g, "\n\n").trim();
-  }
-
-  function extractMetadata() {
-    const getMeta = (name) =>
-      document.querySelector(`meta[name="${name}"], meta[property="${name}"]`)?.content || "";
+    // Metadata
+    const meta = (name) => {
+      const el = document.querySelector(`meta[name="${name}"], meta[property="${name}"]`);
+      return el ? el.content : '';
+    };
 
     return {
-      title: document.title,
       url: window.location.href,
-      description: getMeta("description") || getMeta("og:description"),
-      author: getMeta("author") || getMeta("article:author"),
-      publishedDate: getMeta("article:published_time") || getMeta("date"),
-      siteName: getMeta("og:site_name"),
+      title: document.title || '',
+      text: text,
+      metadata: {
+        author: meta('author') || meta('article:author'),
+        published_date: meta('article:published_time') || meta('date'),
+        site_name: meta('og:site_name'),
+        description: meta('description') || meta('og:description'),
+      },
+      extracted_at: new Date().toISOString(),
+      word_count: words.length,
     };
   }
 
-  browser.runtime.onMessage.addListener((message, _sender, sendResponse) => {
-    if (message.action !== "EXTRACT_CONTENT") return false;
-
-    try {
-      const text = extractMainContent();
-      const metadata = extractMetadata();
-
-      const MAX_WORDS = 12000;
-      const words = text.split(/\s+/);
-      const truncated = words.length > MAX_WORDS
-        ? words.slice(0, MAX_WORDS).join(" ") + "\n\n[... content truncated for analysis]"
-        : text;
-
-      sendResponse({
-        success: true,
-        payload: { ...metadata, text: truncated, wordCount: words.length, extractedAt: new Date().toISOString() },
-      });
-    } catch (err) {
-      sendResponse({ success: false, error: err.message });
+  // Listen for extraction requests from popup
+  browser.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+    if (msg.action === 'extract') {
+      try {
+        sendResponse({ success: true, data: extractContent() });
+      } catch (e) {
+        sendResponse({ success: false, error: e.message });
+      }
     }
-
     return true;
   });
 })();

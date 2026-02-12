@@ -1,400 +1,271 @@
-/**
- * popup.js — Claw Extension Controller
- *
- * Handles the full Claw /v1/analyze response shape:
- *   - Policy decisions (allow / allow_with_modifications / deny)
- *   - PII scan results
- *   - Risk analysis from Claude
- *   - Audit metadata
- *   - 403 Blocked-by-Policy state
- */
-
-(() => {
-  "use strict";
-
-  const CLAW_URL = "http://localhost:8787";
-  const ANALYZE_URL = `${CLAW_URL}/v1/analyze`;
-  const HEALTH_URL  = `${CLAW_URL}/v1/health`;
-
-  // ── DOM Refs ──────────────────────────────────────────
-
-  const $ = (id) => document.getElementById(id);
-
-  const dom = {
-    btn:             $("btn-scan"),
-    statusBar:       $("status-bar"),
-    statusIcon:      $("status-icon"),
-    statusText:      $("status-text"),
-    statusDetail:    $("status-detail"),
-    packBadge:       $("pack-badge"),
-    connDot:         $("connection-dot"),
-    results:         $("results"),
-    denied:          $("denied"),
-    error:           $("error"),
-    errorText:       $("error-text"),
-    // Policy
-    policyBanner:    $("policy-banner"),
-    policyIcon:      $("policy-icon"),
-    policyText:      $("policy-decision-text"),
-    policyDetail:    $("policy-detail"),
-    policyRules:     $("policy-rules"),
-    rulesList:       $("rules-list"),
-    policyMods:      $("policy-mods"),
-    modsList:        $("mods-list"),
-    // PII
-    piiCard:         $("pii-card"),
-    piiTotal:        $("pii-total"),
-    piiGrid:         $("pii-grid"),
-    // Page info
-    pageTitle:       $("page-title"),
-    pageUrl:         $("page-url"),
-    // Analysis
-    summaryCard:     $("summary-card"),
-    summaryBullets:  $("summary-bullets"),
-    riskCard:        $("risk-card"),
-    riskFill:        $("risk-fill"),
-    riskScore:       $("risk-score"),
-    riskRationale:   $("risk-rationale"),
-    safetyCard:      $("safety-card"),
-    safetyList:      $("safety-list"),
-    // Audit
-    auditCard:       $("audit-card"),
-    auditGrid:       $("audit-grid"),
-    // Denied
-    deniedReason:    $("denied-reason"),
-    deniedRules:     $("denied-rules"),
+// Claw Popup Controller — v0.2.0
+(function () {
+  const API = "http://localhost:8787";
+  const $ = (s) => document.querySelector(s);
+  const show = (id) => {
+    document.querySelectorAll(".view").forEach((v) => v.classList.add("hidden"));
+    $(`#${id}`).classList.remove("hidden");
   };
 
-  // ── State ─────────────────────────────────────────────
-
-  function setStatus(state, text, detail = "") {
-    dom.statusBar.className = `status-bar ${state}`;
-    dom.statusText.textContent = text;
-    dom.statusDetail.textContent = detail;
-  }
-
-  function resetUI() {
-    dom.results.classList.add("hidden");
-    dom.denied.classList.add("hidden");
-    dom.error.classList.add("hidden");
-    dom.summaryCard.classList.add("hidden");
-    dom.riskCard.classList.add("hidden");
-    dom.safetyCard.classList.add("hidden");
-    dom.auditCard.classList.add("hidden");
-    dom.piiCard.classList.add("hidden");
-    dom.policyRules.classList.add("hidden");
-    dom.policyMods.classList.add("hidden");
-    dom.summaryBullets.innerHTML = "";
-    dom.safetyList.innerHTML = "";
-    dom.rulesList.innerHTML = "";
-    dom.modsList.innerHTML = "";
-    dom.piiGrid.innerHTML = "";
-    dom.auditGrid.innerHTML = "";
-    dom.deniedRules.innerHTML = "";
-  }
-
-  function showError(msg) {
-    dom.results.classList.add("hidden");
-    dom.denied.classList.add("hidden");
-    dom.error.classList.remove("hidden");
-    dom.errorText.textContent = msg;
-    setStatus("error", "Failed");
-  }
-
-  // ── Health Check ──────────────────────────────────────
-
+  // --- Health check ---
   async function checkHealth() {
     try {
-      const resp = await fetch(HEALTH_URL);
-      const data = await resp.json();
-      dom.connDot.className = "conn-dot ok";
-      if (data.components?.opa?.status === "ok") {
-        dom.packBadge.textContent = "opa connected";
+      const r = await fetch(`${API}/v1/health`, { signal: AbortSignal.timeout(3000) });
+      if (r.ok) {
+        const data = await r.json();
+        $("#connection").classList.toggle("ok", data.status === "healthy");
       }
-      return true;
     } catch {
-      dom.connDot.className = "conn-dot err";
-      return false;
+      $("#connection").classList.remove("ok");
     }
   }
 
-  // ── Content Extraction ────────────────────────────────
-
+  // --- Extract content from active tab ---
   async function extractContent() {
     const [tab] = await browser.tabs.query({ active: true, currentWindow: true });
-    if (!tab?.id) throw new Error("No active tab found.");
-    if (tab.url?.startsWith("about:") || tab.url?.startsWith("moz-extension:")) {
-      throw new Error("Cannot scan browser internal pages.");
-    }
+    if (!tab?.id) throw new Error("No active tab");
 
-    try {
-      await browser.scripting.executeScript({
-        target: { tabId: tab.id },
-        files: ["content/extractor.js"],
-      });
-    } catch { /* may already be loaded */ }
+    await browser.scripting.executeScript({
+      target: { tabId: tab.id },
+      files: ["/content/extractor.js"],
+    });
 
     return new Promise((resolve, reject) => {
-      browser.tabs.sendMessage(tab.id, { action: "EXTRACT_CONTENT" })
-        .then(r => {
-          if (!r) reject(new Error("No response from content script."));
-          else if (!r.success) reject(new Error(r.error));
-          else resolve(r.payload);
-        })
-        .catch(() => reject(new Error("Content script not reachable. Reload the page.")));
+      browser.tabs.sendMessage(tab.id, { action: "extract" }).then((res) => {
+        if (res?.success) resolve(res.data);
+        else reject(new Error(res?.error || "Extraction failed"));
+      }).catch(reject);
     });
   }
 
-  // ── API Call ──────────────────────────────────────────
-
-  async function callClaw(payload) {
-    const resp = await fetch(ANALYZE_URL, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        url: payload.url,
-        title: payload.title,
-        text: payload.text,
-        metadata: {
-          author: payload.author,
-          site_name: payload.siteName,
-          published_date: payload.publishedDate,
-          word_count: payload.wordCount,
-        },
-      }),
-    });
-
-    const data = await resp.json();
-
-    if (resp.status === 403) {
-      return { denied: true, ...data };
-    }
-    if (!resp.ok) {
-      throw new Error(data.detail || `Server error (${resp.status})`);
-    }
-
-    return { denied: false, ...data };
-  }
-
-  // ── Render: Policy Banner ─────────────────────────────
-
-  function renderPolicy(policy, isDenied) {
-    if (isDenied) {
-      dom.policyBanner.className = "policy-banner denied";
-      dom.policyIcon.textContent = "⛔";
-      dom.policyText.textContent = "Blocked by Policy";
-      dom.policyText.style.color = "var(--red)";
-    } else if (policy.decision === "allow_with_modifications") {
-      dom.policyBanner.className = "policy-banner modified";
-      dom.policyIcon.textContent = "⚠";
-      dom.policyText.textContent = "Allowed with Modifications";
-      dom.policyText.style.color = "var(--amber)";
-    } else {
-      dom.policyBanner.className = "policy-banner allow";
-      dom.policyIcon.textContent = "✓";
-      dom.policyText.textContent = "Policy Passed";
-      dom.policyText.style.color = "var(--green)";
-    }
-
-    dom.policyDetail.textContent =
-      `Pack: ${policy.pack} · ${policy.rules_evaluated} rules · ${policy.evaluation_ms}ms`;
-
-    // Matched rules
-    if (policy.matched_rules?.length) {
-      dom.policyRules.classList.remove("hidden");
-      dom.rulesList.innerHTML = "";
-      policy.matched_rules.forEach(r => {
-        const li = document.createElement("li");
-        li.textContent = r;
-        dom.rulesList.appendChild(li);
-      });
-    }
-
-    // Modifications
-    if (policy.modifications_applied?.length) {
-      dom.policyMods.classList.remove("hidden");
-      dom.modsList.innerHTML = "";
-      policy.modifications_applied.forEach(m => {
-        const li = document.createElement("li");
-        li.textContent = m;
-        dom.modsList.appendChild(li);
-      });
-    }
-  }
-
-  // ── Render: PII Scan ──────────────────────────────────
-
+  // --- Render PII grid ---
   function renderPII(pii) {
-    if (!pii) return;
+    const grid = $("#pii-grid");
+    grid.innerHTML = "";
+    const types = ["ssn", "credit_card", "email", "phone", "ip_address", "keyword"];
+    const labels = ["SSN", "Credit Card", "Email", "Phone", "IP Addr", "Keywords"];
+    types.forEach((type, i) => {
+      const count = pii?.counts?.[type] ?? 0;
+      const cell = document.createElement("div");
+      cell.className = `pii-cell ${count > 0 ? "detected" : "clean"}`;
+      cell.innerHTML = `<div class="count">${count}</div><div class="label">${labels[i]}</div>`;
+      grid.appendChild(cell);
+    });
+  }
 
-    dom.piiCard.classList.remove("hidden");
+  // --- Render Knowledge Hub section ---
+  function renderKnowledge(knowledge) {
+    const section = $("#knowledge-section");
+    section.innerHTML = "";
 
-    const total = pii.total || 0;
-    dom.piiTotal.textContent = total === 0 ? "CLEAN" : `${total} FOUND`;
-    dom.piiTotal.className = `pii-total ${total === 0 ? "clean" : "detected"}`;
+    if (!knowledge || (!knowledge.domain_reputation && !knowledge.entries?.length)) {
+      section.innerHTML = '<div class="knowledge-item"><span style="color:#64748b">No prior knowledge for this domain</span></div>';
+      return;
+    }
 
-    const types = [
-      { key: "ssn", label: "SSN" },
-      { key: "credit_card", label: "CC" },
-      { key: "email", label: "Email" },
-      { key: "phone", label: "Phone" },
-      { key: "ip_address", label: "IP" },
-    ];
+    // Domain reputation
+    if (knowledge.domain_reputation) {
+      const rep = knowledge.domain_reputation;
+      const item = document.createElement("div");
+      item.className = "knowledge-item";
+      item.innerHTML = `
+        <span class="domain">${rep.domain || "unknown"}</span>
+        <span class="reputation ${rep.reputation || "unknown"}">${(rep.reputation || "unknown").toUpperCase()}</span>
+      `;
+      section.appendChild(item);
+    }
 
-    dom.piiGrid.innerHTML = "";
-    types.forEach(t => {
-      const count = pii[t.key] || 0;
+    // Knowledge entries
+    if (knowledge.entries?.length) {
+      knowledge.entries.slice(0, 3).forEach((entry) => {
+        const item = document.createElement("div");
+        item.className = "knowledge-item";
+        const disp = entry.disposition || "neutral";
+        item.innerHTML = `
+          <span style="color:#cbd5e1;font-size:10px">${entry.summary || entry.entry_type || "entry"}</span>
+          <span class="reputation ${disp}">${disp.toUpperCase()}</span>
+        `;
+        section.appendChild(item);
+      });
+    }
+  }
+
+  // --- Render Argumentation section ---
+  function renderArgumentation(arg) {
+    const section = $("#argumentation-section");
+    section.innerHTML = "";
+
+    if (!arg || !arg.winning_arguments) {
+      section.innerHTML = '<div class="arg-item">No conflicts to resolve</div>';
+      return;
+    }
+
+    // Semantics label
+    if (arg.semantics) {
+      const sem = document.createElement("div");
+      sem.className = "arg-semantics";
+      sem.textContent = `Semantics: ${arg.semantics} · Decision: ${arg.final_decision || "—"}`;
+      section.appendChild(sem);
+    }
+
+    // Winning arguments
+    (arg.winning_arguments || []).forEach((a) => {
+      const item = document.createElement("div");
+      item.className = "arg-item winning";
+      item.innerHTML = `<strong>✓</strong> ${a.claim || a.id} <span style="color:#64748b">(${a.source || ""}${a.strength != null ? " · " + a.strength : ""})</span>`;
+      section.appendChild(item);
+    });
+
+    // Defeated arguments
+    (arg.defeated_arguments || []).forEach((a) => {
+      const item = document.createElement("div");
+      item.className = "arg-item defeated";
+      item.innerHTML = `<strong>✗</strong> ${a.claim || a.id} <span style="color:#64748b">(${a.source || ""})</span>`;
+      section.appendChild(item);
+    });
+
+    // Explanation
+    if (arg.explanation) {
+      const expl = document.createElement("div");
+      expl.className = "arg-semantics";
+      expl.textContent = arg.explanation;
+      section.appendChild(expl);
+    }
+  }
+
+  // --- Render policy banner ---
+  function renderBanner(decision) {
+    const banner = $("#policy-banner");
+    const d = (decision || "allow").toLowerCase();
+    banner.className = "banner";
+    if (d.includes("deny")) {
+      banner.classList.add("deny");
+      banner.textContent = "⛔ DENIED — Content blocked by policy";
+    } else if (d.includes("modif")) {
+      banner.classList.add("modified");
+      banner.textContent = "⚠ MODIFIED — Content redacted before analysis";
+    } else {
+      banner.classList.add("allow");
+      banner.textContent = "✅ ALLOWED — Content passed governance pipeline";
+    }
+  }
+
+  // --- Render summary ---
+  function renderSummary(analysis) {
+    if (!analysis?.summary) return;
+    const section = $("#summary-section");
+    section.classList.remove("hidden");
+    const list = $("#summary-list");
+    list.innerHTML = "";
+
+    const bullets = Array.isArray(analysis.summary) ? analysis.summary : [analysis.summary];
+    bullets.forEach((b) => {
+      const li = document.createElement("li");
+      li.textContent = b;
+      list.appendChild(li);
+    });
+  }
+
+  // --- Render risk meter ---
+  function renderRisk(analysis) {
+    if (analysis?.risk_score == null) return;
+    const section = $("#risk-section");
+    section.classList.remove("hidden");
+    const score = analysis.risk_score;
+    const fill = $("#risk-fill");
+    const label = $("#risk-score");
+
+    fill.style.width = `${Math.min(score, 100)}%`;
+    fill.className = "risk-fill";
+    if (score <= 33) fill.classList.add("low");
+    else if (score <= 66) fill.classList.add("medium");
+    else fill.classList.add("high");
+    label.textContent = `${score}/100`;
+  }
+
+  // --- Render safety flags ---
+  function renderFlags(analysis) {
+    const section = $("#flags-section");
+    section.innerHTML = "";
+    if (!analysis?.safety_flags?.length) return;
+    section.classList.remove("hidden");
+
+    const secLabel = document.createElement("div");
+    secLabel.className = "section-label";
+    secLabel.textContent = "Safety Flags";
+    section.appendChild(secLabel);
+
+    analysis.safety_flags.forEach((f) => {
       const div = document.createElement("div");
-      div.className = `pii-item ${count > 0 ? "has-pii" : "clean"}`;
-      div.innerHTML = `<span class="pii-count">${count}</span><span class="pii-type">${t.label}</span>`;
-      dom.piiGrid.appendChild(div);
+      const severity = f.severity || "info";
+      div.className = `flag ${severity === "high" ? "danger" : severity === "medium" ? "warning" : "ok"}`;
+      div.textContent = f.message || f;
+      section.appendChild(div);
     });
   }
 
-  // ── Render: Analysis ──────────────────────────────────
-
-  function renderAnalysis(analysis) {
-    if (!analysis) return;
-
-    // Summary
-    if (analysis.summary?.length) {
-      dom.summaryCard.classList.remove("hidden");
-      dom.summaryBullets.innerHTML = "";
-      analysis.summary.forEach(b => {
-        const li = document.createElement("li");
-        li.textContent = b;
-        dom.summaryBullets.appendChild(li);
-      });
-    }
-
-    // Risk
-    const score = Math.max(0, Math.min(10, analysis.risk_score ?? 0));
-    dom.riskCard.classList.remove("hidden");
-    dom.riskFill.style.width = `${score * 10}%`;
-
-    let riskColor;
-    if (score <= 3) riskColor = "var(--green)";
-    else if (score <= 6) riskColor = "var(--amber)";
-    else riskColor = "var(--red)";
-
-    dom.riskFill.style.background = riskColor;
-    dom.riskScore.style.color = riskColor;
-    dom.riskScore.textContent = `${score}/10`;
-    dom.riskRationale.textContent = analysis.risk_rationale || "";
-
-    // Safety flags
-    if (analysis.safety_flags?.length) {
-      dom.safetyCard.classList.remove("hidden");
-      dom.safetyList.innerHTML = "";
-      analysis.safety_flags.forEach(f => {
-        const sev = (f.severity || "ok").toLowerCase();
-        const icon = sev === "danger" ? "✕" : sev === "warning" ? "!" : "✓";
-        const cls = sev === "danger" ? "flag-danger" : sev === "warning" ? "flag-warn" : "flag-ok";
-        const div = document.createElement("div");
-        div.className = `safety-flag ${cls}`;
-        div.innerHTML = `<span class="flag-icon">${icon}</span><span>${f.message}</span>`;
-        dom.safetyList.appendChild(div);
-      });
-    }
-  }
-
-  // ── Render: Audit ─────────────────────────────────────
-
-  function renderAudit(audit) {
-    if (!audit) return;
-    dom.auditCard.classList.remove("hidden");
-    dom.auditGrid.innerHTML = "";
-
+  // --- Render audit trail ---
+  function renderAudit(data) {
+    const section = $("#audit-section");
+    section.innerHTML = "";
     const fields = [
-      ["Hash", audit.content_hash],
-      ["Model", audit.model],
-      ["Tokens In", audit.tokens_in?.toLocaleString()],
-      ["Tokens Out", audit.tokens_out?.toLocaleString()],
-      ["Latency", `${audit.latency_ms}ms`],
+      ["Request ID", data.request_id],
+      ["Model", data.model],
+      ["Policy Pack", data.policy_pack || "standard"],
+      ["Latency", data.latency_ms ? `${data.latency_ms}ms` : "—"],
+      ["Tokens", data.tokens_used || "—"],
+      ["Timestamp", data.timestamp || new Date().toISOString()],
     ];
-
-    fields.forEach(([key, val]) => {
-      if (!val) return;
-      const k = document.createElement("span");
-      k.className = "audit-key";
-      k.textContent = key;
-      const v = document.createElement("span");
-      v.className = "audit-val";
-      v.textContent = val;
-      dom.auditGrid.appendChild(k);
-      dom.auditGrid.appendChild(v);
+    fields.forEach(([k, v]) => {
+      if (v) {
+        const span = document.createElement("span");
+        span.textContent = `${k}: ${v}`;
+        section.appendChild(span);
+      }
     });
   }
 
-  // ── Render: Denied ────────────────────────────────────
-
-  function renderDenied(data) {
-    dom.denied.classList.remove("hidden");
-    dom.deniedReason.textContent = data.reason || "Content blocked by security policy.";
-
-    const rules = data.matched_rules || data.policy?.matched_rules || [];
-    dom.deniedRules.innerHTML = "";
-    rules.forEach(r => {
-      const span = document.createElement("span");
-      span.className = "denied-rule";
-      span.textContent = r;
-      dom.deniedRules.appendChild(span);
-    });
-  }
-
-  // ── Main Flow ─────────────────────────────────────────
-
-  dom.btn.addEventListener("click", async () => {
-    resetUI();
-    dom.btn.disabled = true;
-
+  // --- Main scan handler ---
+  async function scan() {
+    show("loading-view");
     try {
-      // Health check
-      const healthy = await checkHealth();
-      if (!healthy) {
-        showError("Cannot reach Claw server. Run: docker compose up");
-        return;
+      const content = await extractContent();
+
+      const res = await fetch(`${API}/v1/analyze`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          url: content.url,
+          text: content.text,
+          metadata: content.metadata,
+        }),
+      });
+
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.detail || `HTTP ${res.status}`);
       }
 
-      // Extract
-      setStatus("working", "Extracting content", "reading DOM...");
-      const payload = await extractContent();
+      const data = await res.json();
+      show("result-view");
 
-      // Analyze
-      const wordCount = payload.wordCount?.toLocaleString() || "?";
-      setStatus("working", "Analyzing", `${wordCount} words → OPA → Claude`);
-      const data = await callClaw(payload);
-
-      // Page info (always shown)
-      dom.pageTitle.textContent = payload.title || "Untitled";
-      dom.pageUrl.textContent = payload.url;
-
-      if (data.denied) {
-        // ── DENIED ──────────────────────────────────
-        dom.results.classList.remove("hidden");
-        renderPolicy(data.policy, true);
-        renderPII(data.pii_scan);
-        renderDenied(data);
-        setStatus("denied", "Blocked", data.policy?.pack || "");
-      } else {
-        // ── ALLOWED ─────────────────────────────────
-        dom.results.classList.remove("hidden");
-        renderPolicy(data.policy, false);
-        renderPII(data.pii_scan);
-        renderAnalysis(data.analysis);
-        renderAudit(data.audit);
-        setStatus("done", "Complete", `${data.audit?.latency_ms || 0}ms`);
-      }
-
+      // Render all sections
+      renderBanner(data.final_decision || data.policy?.decision);
+      renderPII(data.pii);
+      renderKnowledge(data.knowledge);
+      renderArgumentation(data.argumentation);
+      renderSummary(data.analysis);
+      renderRisk(data.analysis);
+      renderFlags(data.analysis);
+      renderAudit(data);
     } catch (err) {
-      console.error("[Claw]", err);
-      showError(err.message);
-    } finally {
-      dom.btn.disabled = false;
+      show("idle-view");
+      alert(`Scan failed: ${err.message}`);
     }
-  });
+  }
 
-  // ── Init ──────────────────────────────────────────────
+  // --- Init ---
   checkHealth();
-
+  setInterval(checkHealth, 15000);
+  $("#scan-btn").addEventListener("click", scan);
 })();

@@ -1,55 +1,17 @@
 {
   "domain_blocklist": [
-    ".bank.com",
-    ".banking.com",
-    ".chase.com",
-    ".wellsfargo.com",
-    ".bankofamerica.com",
-    ".citibank.com",
-    ".schwab.com",
-    ".fidelity.com",
-    ".malware-domain.com",
-    ".phishing-site.net",
-    ".exfil-data.io"
+    ".bank.com", ".malware.net", ".phishing.com",
+    "evil.example.com", ".darkweb.onion"
   ],
   "internal_domain_patterns": [
-    ".internal.corp",
-    ".corp.local",
-    ".intranet.company.com",
-    ".private.net",
-    ".staging.internal",
-    ".dev.internal"
+    ".corp.local", ".intranet", ".staging.internal", ".dev.internal"
   ],
   "strict_domain_allowlist": [
-    ".gov",
-    ".mil",
-    ".edu",
-    "wikipedia.org",
-    "reuters.com",
-    "apnews.com",
-    "bbc.com",
-    "bbc.co.uk",
-    "nist.gov",
-    "cve.org",
-    "nvd.nist.gov",
-    "arxiv.org",
-    "nature.com",
-    "science.org",
-    "github.com",
-    "stackoverflow.com",
-    "docs.python.org",
-    "developer.mozilla.org"
+    ".gov", ".mil", ".edu", "reuters.com", "bloomberg.com",
+    "sec.gov", "who.int", "nature.com", "arxiv.org"
   ],
   "finance_domain_allowlist": [
-    ".sec.gov",
-    ".treasury.gov",
-    ".federalreserve.gov",
-    ".imf.org",
-    ".worldbank.org",
-    "reuters.com",
-    "bloomberg.com",
-    "ft.com",
-    "wsj.com",
-    "economist.com"
+    ".sec.gov", "reuters.com", "bloomberg.com",
+    "wsj.com", "ft.com", "federalreserve.gov"
   ]
 }

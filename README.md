@@ -1,105 +1,228 @@
-# Claw 🦞
+# 🦞 Claw v0.2.0
 
-### The Governance-First Browser Agent
+**Policy-gated, knowledge-enriched, argumentation-resolved browser content analysis.**
 
-**Secure. Auditable. OPA-Hardened.**
+Claw is an AI governance pipeline that sits between your browser and Claude, enforcing access control policies, detecting PII, building domain knowledge, and resolving policy conflicts through formal argumentation — before any content reaches the model.
 
----
-
-### The Context: Every Tab is an Unguarded Window
-
-We have entered the age of browser-connected AI agents. We treat LLMs as reasoning engines, feeding them data from our browsers to get work done. But currently, that pipeline is a "wild west" of copy-pasting and blind extraction.
-
-Every time we send a webpage to a model, we risk leaking PII, exposing internal secrets, or falling victim to prompt injection attacks hidden in the DOM.
-
-**Claw exists to fix this.**
-
-We are building the missing governance layer for the AI web. Claw acts as a responsible middleman—intercepting, evaluating, and sanitizing browser content *before* it ever touches an LLM.
-
-### What is Claw?
-
-Claw is a bridge between your browser (currently Firefox) and your AI Model (Claude). But unlike standard MCP servers or summarizers, Claw is **opinionated about security.**
-
-It transforms an uncontrolled data firehose into an auditable, compliant, zero-trust pipeline.
-
-* **For Developers:** It’s a "Stripe-like" API for safe browser context.
-* **For Security Engineers:** It’s a Policy Enforcement Point (PEP) using OPA (Open Policy Agent).
-* **For Researchers:** It’s a playground to test prompt defenses and PII masking.
-
-### The Core Thesis
-
-> **"OPA never sees the model, and the model never sees unfiltered content."**
-
-Claw separates the *decision* (Policy) from the *intelligence* (LLM). This ensures that your governance logic remains lightweight, while your model receives only sanitized, policy-approved context.
-
-### Under the Hood: The 4-Stage Pipeline
-
-Claw doesn't just "forward" data. It processes it through a strict pipeline:
-
-1. **Stage 1: Pre-Processing (The Cleaner)**
-Raw text is extracted from the DOM. A PII scanner hunts for sensitive data (emails, SSNs, credit cards) and masks them based on your settings.
-2. **Stage 2: The OPA Gate (The Judge)**
-We construct a metadata object (domain, user role, content features) and send it to the Open Policy Agent. OPA returns a verdict: `allow`, `deny`, or `allow_with_modifications`.
-3. **Stage 3: Context Assembly (The Builder)**
-Approved content is assembled. If OPA demanded redactions, they happen here. The payload is hashed for the audit trail.
-4. **Stage 4: Model Inference (The Thinker)**
-Only now is the secure payload sent to the LLM. The response is captured and risk-scored.
-
-### Getting Started
-
-*Note: Claw is currently in **Phase 1 (Python Prototype)**. We are actively evolving this into a single-binary Go platform.*
-
-**1. Clone the Repository**
-
-```bash
-git clone https://github.com/leeladitya/claw.git
-cd claw
+## Architecture
 
 ```
+Browser Extension
+       │
+       ▼
+┌──────────────────────────────────────────────────┐
+│  6-Stage Governance Pipeline                     │
+│                                                  │
+│  1. PII Scan ──► regex detection & masking       │
+│  2. OPA Gate ──► Rego policy evaluation          │
+│  3. Knowledge Hub ──► domain memory lookup       │
+│  4. Argumentation ──► Dung's AAF resolution      │
+│  5. Context Assembly ──► prompt enrichment       │
+│  6. Model Inference ──► Claude risk analysis     │
+│                                                  │
+│  Audit Trail ──► every decision logged (JSONL)   │
+└──────────────────────────────────────────────────┘
+```
 
-**2. Start the Server**
+### What's New in v0.2.0
+
+- **Knowledge Hub** — persistent domain memory with temporal decay scoring. Claw learns domain reputations over time and feeds contextual arguments into policy decisions.
+- **Argumentation Engine** — implements Dung's (1995) Abstract Argumentation Frameworks with grounded, preferred, and stable extension semantics. When OPA policies conflict or knowledge contradicts policy, formal argumentation provides principled resolution.
+- **Rego-to-AAF Bridge** — converts OPA decisions, Knowledge Hub entries, and PII scan results into a formal argumentation framework with strength-based preference attacks.
+- **Security Hardening** — API key authentication, per-IP rate limiting, restrictive CORS, input validation, non-root Docker container, pinned dependencies.
+- **Test Suite** — 29 test cases covering PII scanning, argumentation engine, Rego bridge, and Knowledge Hub. Plus 10 OPA policy tests.
+- **CI/CD** — GitHub Actions pipeline: OPA tests → Python tests + lint → integration tests.
+
+## Quick Start
+
+```bash
+git clone https://github.com/Leeladitya/claw.git
+cd claw
+cp .env.example .env          # add your ANTHROPIC_API_KEY
+docker compose up              # starts OPA + Claw server
+```
+
+**Install Firefox Extension:**
+1. Navigate to `about:debugging#/runtime/this-firefox`
+2. Click "Load Temporary Add-on"
+3. Select `extension/manifest.json`
+4. Click the 🦞 icon on any page → **Scan & Analyze**
+
+## API Endpoints
+
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | `/v1/analyze` | Full 6-stage pipeline (PII → OPA → Knowledge → Argumentation → Assembly → Claude) |
+| POST | `/v1/policy/evaluate` | Dry-run stages 1-4 only (no model call, zero cost) |
+| GET | `/v1/policy/packs` | List available policy packs |
+| POST | `/v1/knowledge/store` | Manually store a knowledge entry |
+| POST | `/v1/knowledge/query` | Query Knowledge Hub |
+| GET | `/v1/knowledge/reputation/{domain}` | Get domain reputation |
+| GET | `/v1/knowledge/stats` | Knowledge Hub statistics |
+| GET | `/v1/audit/decisions` | Query audit trail |
+| GET | `/v1/health` | Component health check |
+
+### Example: Analyze Content
+
+```bash
+curl -X POST http://localhost:8787/v1/analyze \
+  -H "Content-Type: application/json" \
+  -d '{
+    "url": "https://example.com/article",
+    "text": "Article content to analyze..."
+  }'
+```
+
+### Example: Policy Dry-Run with Argumentation
+
+```bash
+curl -X POST http://localhost:8787/v1/policy/evaluate \
+  -H "Content-Type: application/json" \
+  -d '{
+    "url": "https://test.com",
+    "text": "Content with email@example.com and SSN 123-45-6789"
+  }' | jq '.argumentation'
+```
+
+### Example: Query Domain Knowledge
+
+```bash
+curl http://localhost:8787/v1/knowledge/reputation/example.com
+```
+
+## Argumentation Engine
+
+When the OPA policy gate and Knowledge Hub produce conflicting signals, the Argumentation Engine resolves them using Dung's Abstract Argumentation Frameworks (AAF).
+
+**How it works:**
+
+The Rego Bridge converts pipeline outputs into arguments with strength scores:
+- OPA deny rules → deny arguments (strength 0.9)
+- Critical PII (SSN/CC) → deny arguments (strength 0.95)
+- OPA modifications → modify arguments (strength 0.7)
+- Knowledge "trusted" entries → trust arguments that attack deny rules
+- Knowledge "suspicious" entries → suspicion arguments that attack allow
+- Baseline allow → allow argument (strength 0.3)
+
+Stronger arguments attack weaker ones when their decisions conflict. The engine then computes:
+
+- **Grounded extension** (default): unique, polynomial-time, most skeptical — appropriate for security decisions
+- **Preferred extensions**: maximal admissible sets for tie-breaking
+- **Stable extensions**: complete coverage guarantee
+
+## Knowledge Hub
+
+Claw builds persistent domain memory through a JSONL-backed Knowledge Hub:
+
+- Every policy decision is stored with domain, outcome, and matched rules
+- Subsequent requests for the same domain retrieve historical context
+- Temporal decay (1-week halflife) ensures recent knowledge weighs more
+- Domain reputation aggregated as: trusted, suspicious, mixed, or unknown
+- Knowledge entries feed into the Argumentation Engine as contextual arguments
+
+## Security
+
+See [SECURITY.md](SECURITY.md) for the full security architecture.
+
+| Layer | Mechanism |
+|-------|-----------|
+| Authentication | Bearer token (constant-time comparison) |
+| Rate Limiting | Per-IP token bucket (30-60 req/min by endpoint) |
+| CORS | Configurable allowlist (no wildcard) |
+| Input Validation | Max content size enforcement |
+| PII Masking | SSN, credit card, email, phone, IP detection |
+| Policy Gate | OPA/Rego attribute-based access control |
+| Argumentation | Formal conflict resolution |
+| Audit Trail | Immutable JSONL decision log |
+
+## Configuration
+
+See `.env.example` for all environment variables:
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `ANTHROPIC_API_KEY` | (required) | Claude API key |
+| `CLAW_MODEL` | `claude-sonnet-4-5-20250514` | Model for analysis |
+| `CLAW_POLICY_PACK` | `standard` | Active policy pack |
+| `CLAW_API_KEYS` | (empty = auth disabled) | Comma-separated API keys |
+| `CLAW_CORS_ORIGINS` | localhost + extensions | Allowed CORS origins |
+| `CLAW_MAX_INPUT_CHARS` | `60000` | Max input content length |
+
+## Development
 
 ```bash
 # Install dependencies
 pip install -r requirements.txt
 
-# Run the API bridge
-uvicorn server.main:app --reload --port 8787
+# Run Python tests
+pytest tests/ -v
 
+# Run OPA policy tests
+opa test opa/policies/ opa/data/ -v
+
+# Lint
+ruff check server/ tests/
 ```
 
-**3. Load the Extension**
+See [CONTRIBUTING.md](CONTRIBUTING.md) for full development guide.
 
-1. Open Firefox and navigate to `about:debugging`.
-2. Click **"This Firefox"** > **"Load Temporary Add-on"**.
-3. Select the `manifest.json` file in the `/extension` folder.
+## Project Structure
 
-**4. Analyze**
-Navigate to any webpage, open the Claw extension, and hit **Analyze**. Watch your terminal to see the policy engine in action.
+```
+claw/
+├── server/
+│   ├── app.py                    # FastAPI app, 6-stage pipeline
+│   ├── middleware/
+│   │   ├── auth.py               # API key authentication
+│   │   ├── rate_limiter.py       # Per-IP token bucket
+│   │   ├── pii_scanner.py        # Regex PII detection
+│   │   └── opa_client.py         # OPA sidecar client
+│   ├── knowledge/
+│   │   ├── hub.py                # JSONL-backed Knowledge Hub
+│   │   └── models.py             # Knowledge data models
+│   ├── argumentation/
+│   │   ├── engine.py             # Dung's AAF engine
+│   │   ├── models.py             # Argumentation data models
+│   │   └── rego_bridge.py        # OPA → AAF converter
+│   └── utils/
+│       └── audit.py              # JSONL audit logger
+├── opa/
+│   ├── policies/
+│   │   ├── main.rego             # Access control policies
+│   │   └── main_test.rego        # OPA policy tests
+│   └── data/
+│       └── data.json             # Domain lists, config
+├── extension/
+│   ├── manifest.json             # Firefox extension manifest
+│   ├── content/extractor.js      # DOM content extraction
+│   ├── popup/
+│   │   ├── popup.html            # Extension UI
+│   │   ├── popup.css             # Dark industrial theme
+│   │   └── popup.js              # Popup controller
+│   └── icons/                    # Extension icons
+├── tests/
+│   └── test_claw.py              # 29 test cases
+├── .github/workflows/ci.yml      # CI/CD pipeline
+├── Dockerfile                    # Non-root container
+├── docker-compose.yml            # OPA + Claw orchestration
+├── requirements.txt              # Pinned Python deps
+├── SECURITY.md                   # Security architecture
+├── CONTRIBUTING.md               # Development guide
+└── CHANGELOG.md                  # Version history
+```
 
-### The Roadmap
+## Theoretical Foundation
 
-We are building in public. Here is where Claw is heading:
+Claw's argumentation engine is inspired by research on integrating formal argumentation theory with AI governance. The Rego-to-AAF bridge demonstrates that declarative policy languages (Rego/OPA) can be combined with argumentation-based conflict resolution (Dung, 1995) for principled policy decision-making under conflicting evidence.
 
-* **Phase 1 (Current):** Working Python prototype with basic OPA rules and PII scanning.
-* **Phase 2 (The Rewrite):** moving to a **Single Go Binary**. No pip, no venv. Just download and run.
-* **Phase 3 (Distribution):** Public availability on Mozilla Add-ons and Chrome Web Store.
-* **Phase 4 (Enterprise):** SIEM integration, SOC 2 compliance mapping, and advanced "Strict" policy packs.
+**Key references:**
+- Dung, P.M. (1995). "On the acceptability of arguments and its fundamental role in nonmonotonic reasoning, logic programming and n-person games." *Artificial Intelligence*, 77(2), 321-357.
+- Open Policy Agent (OPA) — https://www.openpolicyagent.org/
 
-### Community & Philosophy
+## License
 
-Claw is humble in its approach but ambitious in its vision. We believe that governance shouldn't require a PhD in security or days of YAML configuration.
-
-We are looking for:
-
-* **Rust/Go developers** to help with the binary rewrite.
-* **Security researchers** to stress-test our prompt injection detection.
-* **Policy geeks** to help write better Rego policy packs.
-
-If you care about what context reaches your AI systems, you belong here.
+MIT
 
 ---
 
-**[Contribute to Claw]** • **[Read the Vision Doc]** • **[Discuss on Discord]**
-
-*Built with 🦞 by Saatvix*
+Built with the conviction that AI governance should be formal, auditable, and principled.
