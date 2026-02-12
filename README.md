@@ -52,7 +52,7 @@ Only now is the secure payload sent to the LLM. The response is captured and ris
 **1. Clone the Repository**
 
 ```bash
-git clone https://github.com/yourusername/claw.git
+git clone https://github.com/leeladitya/claw.git
 cd claw
 
 ```
@@ -102,4 +102,4 @@ If you care about what context reaches your AI systems, you belong here.
 
 **[Contribute to Claw]** • **[Read the Vision Doc]** • **[Discuss on Discord]**
 
-*Built with 🦞 by Devudaaaa.xyz for Saatvix*
+*Built with 🦞 by Saatvix*
