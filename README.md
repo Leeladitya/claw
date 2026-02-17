@@ -318,4 +318,4 @@ Because governance decisions that affect everyone should be reasoned about by ev
 
 **License:** MIT
 
-**Built by:** [saatvix.com](https://saatvix.com)
+**Built for:** [saatvix.com](https://saatvix.com)
