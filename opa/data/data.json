@@ -1,17 +1,26 @@
 {
   "domain_blocklist": [
     ".bank.com", ".malware.net", ".phishing.com",
-    "evil.example.com", ".darkweb.onion"
+    "evil.example.com", ".darkweb.onion",
+    ".scam.org", ".ransomware.net"
   ],
   "internal_domain_patterns": [
-    ".corp.local", ".intranet", ".staging.internal", ".dev.internal"
+    ".corp.local", ".intranet", ".staging.internal",
+    ".dev.internal", ".test.local"
   ],
   "strict_domain_allowlist": [
     ".gov", ".mil", ".edu", "reuters.com", "bloomberg.com",
-    "sec.gov", "who.int", "nature.com", "arxiv.org"
+    "sec.gov", "who.int", "nature.com", "arxiv.org",
+    "pubmed.gov", "nih.gov", "ieee.org"
   ],
   "finance_domain_allowlist": [
     ".sec.gov", "reuters.com", "bloomberg.com",
-    "wsj.com", "ft.com", "federalreserve.gov"
+    "wsj.com", "ft.com", "federalreserve.gov",
+    "treasury.gov", "imf.org", "worldbank.org"
+  ],
+  "healthcare_domain_allowlist": [
+    "pubmed.gov", "nih.gov", "who.int",
+    "cdc.gov", "fda.gov", "ncbi.nlm.nih.gov",
+    "nature.com", "thelancet.com", "nejm.org"
   ]
 }

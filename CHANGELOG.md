@@ -1,5 +1,31 @@
 # Changelog
 
+## [0.3.0] - 2026-02-14
+
+### Added
+- **SDAM Model**: Powell's Sequential Decision Analytics framework applied to governance scenarios
+  - GovernanceState mapping Powell's S_t = (R_t, I_t, B_t) to CISO decision state
+  - PFA Policy (threshold rules) and CFA Policy (parameterized optimization) implementations
+  - Monte Carlo simulation engine with configurable seeds
+  - Policy search via grid optimization over θ parameters
+  - Community data integration: load_arena_export() and batch_analyze_exports()
+  - CFA outperforms PFA in 200/200 Monte Carlo simulations (52.86 vs 48.37 avg score)
+- **Expanded OPA Policies**: 12 deny rules (was 7), 5 modification rules (was 2)
+  - Healthcare policy pack with PHI keyword blocking and aggregate PII detection
+  - Finance domain enforcement (allowlist-only for financial pack)
+  - Content volume threshold (50K word max)
+  - Bearer/access/refresh token credential detection
+  - Community scenario schema validation
+  - Risk score computation for argumentation bridge
+  - Policy metadata output for argumentation engine
+- **20 OPA test cases** (was 10)
+- **Folder README files**: dual-audience documentation (everyone + developers) for server/, argumentation/, knowledge/, opa/, extension/, tests/
+- **community_data/ directory**: Arena game export collection with analysis instructions
+
+### Changed
+- Version bump from 0.2.0 to 0.3.0
+- data.json expanded with healthcare domain allowlist
+
 ## [0.2.0] - 2026-02-12
 
 ### Added
