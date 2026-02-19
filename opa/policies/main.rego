@@ -1,4 +1,4 @@
-# Claw v0.2.0 — Main Policy Bundle
+# Claw v0.3.0 — Main Policy Bundle
 # ═══════════════════════════════════════════════════════════════
 #
 # WHAT THIS IS (for everyone):
