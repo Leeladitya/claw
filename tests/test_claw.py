@@ -1,5 +1,5 @@
 """
-Claw v0.2.0 Test Suite
+Claw v0.3.0 Test Suite
 
 Tests covering:
 - PII Scanner: detection accuracy and masking
