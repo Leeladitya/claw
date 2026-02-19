@@ -1,5 +1,5 @@
 """
-Claw v0.2.0 — Governance-First Browser Context API
+Claw v0.3.0 — Governance-First Browser Context API
 
 6-Stage Pipeline:
   1. PII Scan          → Detect and classify sensitive data
@@ -9,13 +9,14 @@ Claw v0.2.0 — Governance-First Browser Context API
   5. Context Assembly  → Build sanitized payload with knowledge context
   6. Model Inference   → Claude analysis with Risk Auditor prompt
 
-New in v0.2.0:
-  - Knowledge Hub (persistent contextual memory)
-  - Argumentation Engine (ASPARTIX-inspired conflict resolution)
-  - API key authentication (P0 audit fix)
-  - Rate limiting (P0 audit fix)
-  - CORS restriction (P0 audit fix)
-  - Input size validation (P0 audit fix)
+New in v0.3.0:
+  - Powell's SDAM framework for sequential decision modeling
+  - 6 policy packs: standard, strict, research, finance, healthcare, community
+  - Risk score computation for argumentation bridge
+  - Community data pipeline for SDAM integration
+
+Previously (v0.2.0):
+  - Knowledge Hub, Argumentation Engine, API key auth, rate limiting, CORS, input validation
 """
 
 from __future__ import annotations
@@ -93,7 +94,7 @@ async def lifespan(app: FastAPI):
         logger.warning("ANTHROPIC_API_KEY not set — model inference disabled")
 
     logger.info(
-        f"Claw v0.2.0 started | OPA={OPA_URL} | "
+        f"Claw v0.3.0 started | OPA={OPA_URL} | "
         f"Knowledge={knowledge_hub.stats['total_entries']} entries | "
         f"Policy={DEFAULT_POLICY_PACK}"
     )
