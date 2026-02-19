@@ -3,7 +3,7 @@ package claw.main_test
 import rego.v1
 
 # ═══════════════════════════════════════════════════════════════
-# TEST SUITE for Claw v0.2.0 Policy Bundle
+# TEST SUITE for Claw v0.3.0 Policy Bundle
 #
 # WHAT THESE DO (for everyone):
 #   Each test simulates a specific situation and checks that the
