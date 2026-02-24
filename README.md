@@ -93,12 +93,22 @@ docker compose up              # starts OPA + Claw server
 
 That's it. Claw is running on `http://localhost:8787`.
 
-### Firefox Extension
+### Browser Extension
 
+The extension works across all major Chromium browsers and Firefox from a single codebase.
+
+**Chrome / Edge / Brave:**
+1. Navigate to `chrome://extensions/`
+2. Enable **Developer mode** (toggle top-right)
+3. Click **Load unpacked** → select `extension/`
+4. The Claw shield icon appears in the toolbar
+
+**Firefox:**
 1. Go to `about:debugging#/runtime/this-firefox`
-2. Click "Load Temporary Add-on"
-3. Select `extension/manifest.json`
-4. Visit any page → click the 🦞 icon → **Scan & Analyze**
+2. Click **Load Temporary Add-on** → select `extension/manifest.json`
+3. The Claw shield icon appears in the toolbar
+
+Visit any page → click the 🦞 icon → **Scan & Analyze**
 
 You'll see the full pipeline result: PII detection grid, policy decision, domain reputation from Knowledge Hub, argumentation breakdown (which arguments won, which lost, and why), risk analysis, and audit trail.
 
@@ -201,6 +211,20 @@ v0.3.0 expanded from 7 to **12 deny rules** and from 2 to **5 modification rules
 
 ---
 
+## Browser Compatibility
+
+The extension ships as a single codebase that works across browsers using a cross-browser compatibility shim (`const B = typeof browser !== "undefined" ? browser : chrome`). Firefox exposes `browser.*` (Promise-native), Chrome 116+ MV3 exposes `chrome.*` with Promise support — both work identically after the alias.
+
+| Browser | Status | Notes |
+|---------|--------|-------|
+| Chrome 116+ | ✅ | Load unpacked from `extension/` |
+| Edge (Chromium) | ✅ | Same as Chrome |
+| Brave | ✅ | Same as Chrome |
+| Firefox 109+ | ✅ | Load temporary add-on |
+| Safari | ❌ | Different extension model |
+
+---
+
 ## Security
 
 Claw was built to pass a security audit. Every finding from the v0.1.0 quality assessment has been addressed:
@@ -274,7 +298,7 @@ claw/
 │   ├── policies/main.rego        # 12 deny + 5 modify rules (v0.3.0)
 │   ├── policies/main_test.rego   # 20 OPA tests
 │   └── data/data.json            # Domain lists, configuration
-├── extension/                    # Firefox browser extension
+├── extension/                    # Cross-browser extension (Chrome/Edge/Brave/Firefox)
 ├── tests/
 │   ├── test_claw.py              # 28 pipeline tests
 │   └── test_sdam.py              # 37 SDAM tests (v0.3.0)
