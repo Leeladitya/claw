@@ -1,5 +1,8 @@
-// Claw Popup Controller — v0.2.0
+// Claw Popup Controller — v0.3.1
 (function () {
+  // Cross-browser compat: Firefox uses browser.*, Chrome uses chrome.*
+  const B = typeof browser !== "undefined" ? browser : chrome;
+
   const API = "http://localhost:8787";
   const $ = (s) => document.querySelector(s);
   const show = (id) => {
@@ -22,16 +25,27 @@
 
   // --- Extract content from active tab ---
   async function extractContent() {
-    const [tab] = await browser.tabs.query({ active: true, currentWindow: true });
+    const [tab] = await B.tabs.query({ active: true, currentWindow: true });
     if (!tab?.id) throw new Error("No active tab");
 
-    await browser.scripting.executeScript({
-      target: { tabId: tab.id },
-      files: ["/content/extractor.js"],
-    });
+    // Block browser internal pages (Firefox about:, Chrome chrome://)
+    if (tab.url?.startsWith("about:") || tab.url?.startsWith("chrome://") ||
+        tab.url?.startsWith("chrome-extension://") || tab.url?.startsWith("moz-extension://")) {
+      throw new Error("Cannot scan browser internal pages");
+    }
+
+    // Ensure content script is injected (handles tabs opened before install)
+    try {
+      await B.scripting.executeScript({
+        target: { tabId: tab.id },
+        files: ["/content/extractor.js"],
+      });
+    } catch {
+      // May fail if already injected or restricted page — continue
+    }
 
     return new Promise((resolve, reject) => {
-      browser.tabs.sendMessage(tab.id, { action: "extract" }).then((res) => {
+      B.tabs.sendMessage(tab.id, { action: "extract" }).then((res) => {
         if (res?.success) resolve(res.data);
         else reject(new Error(res?.error || "Extraction failed"));
       }).catch(reject);
