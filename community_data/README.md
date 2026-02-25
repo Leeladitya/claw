@@ -8,7 +8,7 @@ Once there are enough playthroughs, the SDAM model (`server/sdam_model.py`) can 
 
 ## How to Contribute Your Playthrough
 
-1. Play the Arena game at [saatvix.com/arena](https://saatvix.com/arena)
+1. Play the Arena game at [saatvix.com/arena](https://saatvix.com/arena.html)
 2. Click "Export to AGORA" at the end
 3. A file like `agora-arena-1707912345.json` downloads
 4. Drop it in this folder
